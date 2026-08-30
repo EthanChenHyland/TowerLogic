@@ -414,7 +414,7 @@ This project is not affiliated with, endorsed by, sponsored by, or associated wi
 
 Users are responsible for complying with applicable software, platform, game, dataset, and third-party terms when running or modifying the project.
 
-````
+
 
 **GitHub description:**
 
