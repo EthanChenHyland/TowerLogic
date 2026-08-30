@@ -6,7 +6,11 @@ import time
 import numpy as np
 from PIL import Image
 
-top_folder = r"recordings"
+from towerlogic.utils.platform import get_app_data_dir
+
+top_folder = os.path.expanduser(
+    os.getenv("PYCLASHBOT_RECORDINGS_DIR", os.path.join(get_app_data_dir("TowerLogic"), "recordings"))
+)
 
 
 def is_valid_play_input(play_coord, card_index):
@@ -249,7 +253,7 @@ def to_csv():
     print(f"\t-Created a total of {no_play_rows_added} no play images")
     print(f"\t-Using {len(results_timestamps)} results files")
 
-    csv_extraction_path = r"recordings/recordings.csv"
+    csv_extraction_path = os.path.join(top_folder, "recordings.csv")
 
     with open(csv_extraction_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)

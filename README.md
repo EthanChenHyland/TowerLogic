@@ -228,7 +228,7 @@ TowerLogic/
 
 ### Core
 
-* Python 3.12+
+* Python 3.12–3.14 (the project metadata enforces this range)
 * OpenCV
 * NumPy
 * Pillow
@@ -236,8 +236,8 @@ TowerLogic/
 
 ### Machine Learning
 
-* PyTorch
-* torchvision
+* PyTorch and torchvision (optional; hand classification and policy training)
+* ONNX Runtime (optional; field detector inference)
 * YOLOv8-format datasets
 * image classification
 * computer vision
@@ -253,10 +253,11 @@ TowerLogic/
 
 ## Installation
 
-Create a Python environment:
+The repository has no lockfile, so an exact historical environment cannot be reconstructed. On Apple Silicon, use a supported Python and recreate the environment from `pyproject.toml`:
 
 ```bash
-python -m venv .venv
+brew install python@3.12 python-tk@3.12 android-platform-tools
+/opt/homebrew/bin/python3.12 -m venv .venv
 ```
 
 Activate it.
@@ -270,19 +271,20 @@ source .venv/bin/activate
 Install the core project:
 
 ```bash
-pip install -e .
+python -m pip install --upgrade pip
+python -m pip install -e .
 ```
 
 For machine-learning functionality, also install the optional ML dependencies:
 
 ```bash
-pip install -e ".[ml]"
+python -m pip install -e ".[ml]"
 ```
 
-The training script additionally uses `torchvision`, so install it if needed:
+For YOLO training/export experiments, install the separate optional extra:
 
 ```bash
-pip install torchvision
+python -m pip install -e ".[yolo]"
 ```
 
 ## Running TowerLogic
@@ -295,13 +297,13 @@ python -m towerlogic
 
 The repository also contains:
 
-```text
-run_bot.sh
+```bash
+bash run_bot.sh
 ```
 
 for launching the project in supported local environments.
 
-Actual emulator configuration will depend on the platform and Android environment being used.
+The GUI can start on macOS, but a bot run requires a reachable ADB device, Clash Royale installed and configured, and a 419×633 / density-160 screen. Generic ADB is cross-platform; MEmu and Google Play Games Developer Emulator are Windows-only. BlueStacks is conditional on the installed version matching the controller's expected layout.
 
 ## Training the Hand-Card Classifier
 
@@ -342,6 +344,8 @@ mps
 
 Otherwise it falls back to CUDA or CPU depending on the machine.
 
+The field detector uses ONNX Runtime on CPU. The committed detector is `towerlogic/models/field_detector.onnx`; the matching PyTorch checkpoint is `towerlogic/models/field_detector.pt`.
+
 ## Development Notes
 
 TowerLogic was developed as an experimental project rather than a production gameplay product.
@@ -360,27 +364,15 @@ As a result, some components are research-oriented or exploratory rather than pa
 
 ## Repository Cleanup
 
-Local development environments and generated files should not be committed.
-
-A recommended `.gitignore` includes:
-
-```gitignore
-.venv/
-venv/
-
-__pycache__/
-*.py[cod]
-
-.DS_Store
-._*
-__MACOSX/
-
-runs/
-
-*.log
-```
+Local development environments and generated files should not be committed. A `.gitignore` is included for environments, Python/macOS metadata, recordings, and exported ONNX files. Existing historical artifacts remain tracked until deliberately removed.
 
 The virtual environment should be named `.venv/` locally and recreated from project dependencies rather than uploaded to GitHub.
+
+## Platform and external requirements
+
+No emulator, APK, Android game installation, ADB device, or Windows emulator installation is bundled. The image templates and fixed coordinates are tied to the expected 419×633 game viewport and may require updates when the game UI changes. The hand-classifier checkpoint and class map are under `towerlogic/models/`; policy checkpoints are under `models/`. The smaller ImageFolder dataset used by the hand-classifier workflow is `cards_deck/` (train/valid only).
+
+Useful runtime overrides are provided through environment variables, including `PYCLASHBOT_RECORDINGS_DIR`, `PYCLASHBOT_HAND_MODEL`, `PYCLASHBOT_HAND_USE_CLASSIFIER`, `PYCLASHBOT_FIELD_DETECTOR`, `PYCLASHBOT_FIELD_CLASSES`, `PYCLASHBOT_BLUESTACKS_APP`, `PYCLASHBOT_BLUESTACKS_DATA`, and `PYCLASHBOT_BLUESTACKS_MIM_APP`. Policy sampling and confidence thresholds use additional `PYCLASHBOT_*` variables in the detection and policy modules.
 
 ## Dataset Attribution
 
@@ -388,7 +380,7 @@ The included Clash Royale YOLOv8 dataset was obtained through Roboflow.
 
 **Dataset:** Clash royale v6
 **Source:** Roboflow Universe
-**Images:** 1,792
+**Images:** 1,727 files currently present in this checkout (the upstream export documentation says 1,792)
 **Format:** YOLOv8
 **License:** CC BY 4.0
 

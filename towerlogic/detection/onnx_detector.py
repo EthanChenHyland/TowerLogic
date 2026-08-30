@@ -41,7 +41,7 @@ class DetectionSummary:
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-DEFAULT_MODEL_PATH = ROOT_DIR / "runs" / "detect" / "train" / "weights" / "best.onnx"
+DEFAULT_MODEL_PATH = ROOT_DIR / "towerlogic" / "models" / "field_detector.onnx"
 DEFAULT_CLASS_YAML = ROOT_DIR / "Clash royale.v6i.yolov8" / "data.yaml"
 DEFAULT_INPUT_SIZE = 640
 DEFAULT_CONF = 0.25
@@ -128,7 +128,11 @@ class OnnxTroopDetector:
         xyxy[:, [1, 3]] *= scale_y
 
         # NMS
-        boxes_nms = xyxy.tolist()
+        # OpenCV expects [x, y, width, height], not [x1, y1, x2, y2].
+        boxes_nms = [
+            [float(x1), float(y1), float(x2 - x1), float(y2 - y1)]
+            for x1, y1, x2, y2 in xyxy
+        ]
         scores_nms = confs.tolist()
         indices = cv2.dnn.NMSBoxes(boxes_nms, scores_nms, self.conf_threshold, self.iou_threshold)
         if len(indices) == 0:
@@ -213,7 +217,8 @@ def classify_detection_side(image: np.ndarray, det: Detection) -> str:
         return "unknown"
     # Use RGB mean to decide red vs blue bar.
     mean = roi.reshape(-1, 3).mean(axis=0)
-    r, g, b = float(mean[0]), float(mean[1]), float(mean[2])
+    # Screenshots decoded by OpenCV are BGR.
+    b, g, r = float(mean[0]), float(mean[1]), float(mean[2])
     red_score = r - max(g, b)
     blue_score = b - max(r, g)
     if r > 120 and red_score > 25:

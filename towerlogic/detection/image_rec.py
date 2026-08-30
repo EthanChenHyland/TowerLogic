@@ -113,8 +113,9 @@ def compare_images(
     Returns:
         list[int] | None: pixel location [y, x] or None if not found
     """
-    img_gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    template_gray = cv2.cvtColor(template, cv2.COLOR_RGB2GRAY)
+    # Both screenshots and templates are decoded by OpenCV in BGR order.
+    img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
 
     # Check if template is larger than image
     if template_gray.shape[0] > img_gray.shape[0] or template_gray.shape[1] > img_gray.shape[1]:

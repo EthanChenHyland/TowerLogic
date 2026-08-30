@@ -1,4 +1,5 @@
 import traceback
+import os
 from multiprocessing import Event, Process, Queue
 from typing import Any
 
@@ -29,6 +30,9 @@ class WorkerProcess(Process):
 
     def _setup_emulator(self, jobs: dict[str, Any], logger: ProcessLogger):
         """Set up the appropriate emulator based on job configuration."""
+        if os.getenv("TOWERLOGIC_DRY_RUN", "").strip().lower() in {"1", "true", "yes", "on"}:
+            print("DRY RUN ENABLED — emulator input is suppressed")
+            logger.log("DRY RUN ENABLED — emulator input is suppressed")
         emulator_selection = jobs.get("emulator", EmulatorType.MEMU)
         registry = get_emulator_registry()
 

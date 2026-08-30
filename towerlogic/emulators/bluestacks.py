@@ -8,7 +8,13 @@ import time
 from contextlib import suppress
 from os.path import normpath
 
-from towerlogic.bot.nav import check_if_in_battle, check_if_on_clash_main_menu
+import cv2
+
+from towerlogic.bot.nav import (
+    check_if_in_battle,
+    detect_current_clash_main_menu,
+    inspect_clash_main_menu,
+)
 from towerlogic.emulators.adb_base import AdbBasedController
 from towerlogic.utils.cancellation import interruptible_sleep
 from towerlogic.utils.platform import Platform, is_macos
@@ -76,19 +82,15 @@ class BlueStacksEmulatorController(AdbBasedController):
 
         # Platform-aware config paths
         self.bs_conf_path, self.mim_meta_path = self._find_config_paths()
+        # BlueStacks Air no longer always ships the legacy Multi-Instance
+        # Manager metadata file.  The authoritative instance/port settings
+        # are present in bluestacks.conf, so metadata is optional; retain it
+        # only as an additional display-name mapping when available.
         if not os.path.isfile(self.mim_meta_path):
             print(
-                f"[Bluestacks 5] MimMetaData.json not found at {self.mim_meta_path}. Launching Multi-Instance Manager to create it..."
+                f"[Bluestacks 5] Optional MimMetaData.json not found at {self.mim_meta_path}; "
+                "using bluestacks.conf for instance discovery."
             )
-            self._open_multi_instance_manager()
-            deadline = time.time() + 10
-            while time.time() < deadline:
-                if os.path.isfile(self.mim_meta_path):
-                    print("[Bluestacks 5] MimMetaData.json detected.")
-                    break
-                interruptible_sleep(0.5)
-            else:
-                raise FileNotFoundError("[Bluestacks 5] MimMetaData.json not created within 10 seconds.")
         if DEBUG:
             print(f"[Bluestacks 5] bs_conf_path: {self.bs_conf_path}")
             print(f"[Bluestacks 5] mim_meta_path: {self.mim_meta_path}")
@@ -111,7 +113,7 @@ class BlueStacksEmulatorController(AdbBasedController):
         """Locate BlueStacks 5 installation folder."""
         if is_macos():
             # macOS: Check standard app location
-            app_path = "/Applications/BlueStacks.app"
+            app_path = os.path.expanduser(os.getenv("PYCLASHBOT_BLUESTACKS_APP", "/Applications/BlueStacks.app"))
             macos_dir = os.path.join(app_path, "Contents", "MacOS")
             # macOS uses "BlueStacks" as the main executable, not "HD-Player"
             if os.path.isdir(macos_dir) and os.path.isfile(os.path.join(macos_dir, "BlueStacks")):
@@ -132,7 +134,9 @@ class BlueStacksEmulatorController(AdbBasedController):
     def _find_config_paths(self) -> tuple[str, str]:
         """Return (bluestacks_conf_path, mim_meta_path) for the current platform."""
         if is_macos():
-            base = "/Users/Shared/Library/Application Support/BlueStacks"
+            base = os.path.expanduser(
+                os.getenv("PYCLASHBOT_BLUESTACKS_DATA", "/Users/Shared/Library/Application Support/BlueStacks")
+            )
             bs_conf = os.path.join(base, "bluestacks.conf")
             # macOS stores MimMetaData.json under Engine/UserData
             mim_meta = os.path.join(base, "Engine", "UserData", "MimMetaData.json")
@@ -319,6 +323,8 @@ class BlueStacksEmulatorController(AdbBasedController):
         return True
 
     def _update_mim_name(self, mim_path: str, internal_name: str, ui_name: str) -> None:
+        if not os.path.isfile(mim_path):
+            return
         data = self._read_json(mim_path)
         data.setdefault("Organization", [])
         org = data["Organization"]
@@ -341,7 +347,10 @@ class BlueStacksEmulatorController(AdbBasedController):
     def _open_multi_instance_manager(self) -> None:
         """Open BlueStacks Multi-Instance Manager."""
         if is_macos():
-            subprocess.Popen(["open", "/Applications/BlueStacksMIM.app"])
+            mim_app = os.path.expanduser(
+                os.getenv("PYCLASHBOT_BLUESTACKS_MIM_APP", "/Applications/BlueStacksMIM.app")
+            )
+            subprocess.Popen(["open", mim_app])
         else:
             with suppress(Exception):
                 os.startfile(os.path.join(self.base_folder, "HD-MultiInstanceManager.exe"))
@@ -770,8 +779,10 @@ class BlueStacksEmulatorController(AdbBasedController):
         clash_pkg = "com.supercell.clashroyale"
         self.logger.change_status("Launching Clash Royale...")
 
-        # Use inherited start_app which handles installation check
-        if not self.start_app(clash_pkg):
+        # Check installation without launching through monkey.  BlueStacks Air
+        # can leave a black surface when the app is launched twice in quick
+        # succession, so use one canonical activity launch below.
+        if not self._check_app_installed(clash_pkg):
             # This means app is not installed and user is being prompted.
             # We must wait for the installation loop (handled by base class) to finish
             # The base class's _wait_for_clash_installation will block until
@@ -780,58 +791,104 @@ class BlueStacksEmulatorController(AdbBasedController):
 
             # After _wait_for_clash_installation returns True, we need to manually
             # re-trigger the app start, because the original call failed.
-            self.start_app(clash_pkg)
+            if not self._wait_for_clash_installation(clash_pkg):
+                return False
 
-        # Force stop the store shell (best-effort) and launch Clash via intent.
-        self._force_stop_store_shell()
-        self._force_launch_clash(clash_pkg)
-        interruptible_sleep(3)
-        last_launch_attempt = time.time()
+        self._force_launch_clash(clash_pkg, retries=1)
+        launch_started = time.time()
 
         # Wait for main menu
         self.logger.change_status("Waiting for Clash Royale main menu...")
         deadline = time.time() + 240
         while time.time() < deadline:
-            if check_if_on_clash_main_menu(self):
+            foreground = self._get_foreground_package()
+            process_running = self._is_clash_process_running(clash_pkg)
+            screenshot_available = False
+            rendered = False
+            main_menu = False
+            detector_used = "none"
+            current_details = {}
+            menu_pixels, menu_matches = [], []
+            try:
+                readiness_image = self.screenshot()
+                screenshot_available = readiness_image is not None
+                rendered = bool(screenshot_available and readiness_image.size and int(readiness_image.max()) > 8)
+                if screenshot_available:
+                    cv2.imwrite("/tmp/towerlogic-startup-readiness.png", readiness_image)
+                    legacy_menu, menu_pixels, menu_matches = inspect_clash_main_menu(readiness_image)
+                    current_menu, current_details = detect_current_clash_main_menu(readiness_image)
+                    main_menu = current_menu or legacy_menu
+                    detector_used = "current_ui" if current_menu else ("legacy_pixels" if legacy_menu else "none")
+            except Exception as exc:
+                self.logger.log(f"Startup readiness screenshot failed: {exc}")
+
+            battle_detected = check_if_in_battle(self) if screenshot_available else False
+            self.logger.log(f"process_exists={process_running}")
+            self.logger.log(f"foreground_detected={foreground == clash_pkg}")
+            self.logger.log(f"foreground_package={foreground}")
+            self.logger.log(f"rendered_frame_valid={rendered}")
+            self.logger.log(f"screenshot_available={screenshot_available}")
+            self.logger.log(f"main_menu_recognized={main_menu}")
+            self.logger.log(f"main_menu_detector={detector_used}")
+            self.logger.log(f"main_menu_match_scores={current_details}")
+            self.logger.log(f"battle_detected={battle_detected}")
+            self.logger.log(f"launch_age={time.time() - launch_started:.1f}s")
+            self.logger.log(f"startup_timeout_remaining={max(0.0, deadline - time.time()):.1f}s")
+            if screenshot_available and not main_menu:
+                self.logger.log(f"main_menu_pixels={menu_pixels}")
+                self.logger.log(f"main_menu_pixel_matches={menu_matches}")
+
+            if main_menu:
                 self.logger.change_status("Clash Royale main menu detected")
                 dur = f"{time.time() - start_ts:.1f}s"
                 self.logger.log(f"BlueStacks 5 restart completed in {dur}")
                 return True
-            if check_if_in_battle(self):
+            if battle_detected:
                 self.logger.change_status("Battle detected; waiting for it to finish before relaunching...")
                 interruptible_sleep(3)
                 continue
-            fg = self._get_foreground_package()
-            if fg == clash_pkg:
-                # Already in Clash Royale; don't spam relaunch. Just wait.
+            if foreground == clash_pkg or process_running:
+                # A foreground or still-starting process must be allowed to
+                # finish initialization; recognition failure is not a crash.
+                self.logger.change_status("Waiting for game initialization...")
                 interruptible_sleep(1.5)
                 continue
-            # Re-assert the launch if we're still not on the main menu and Clash isn't foreground.
-            if time.time() - last_launch_attempt > 6.0:
-                self._force_stop_store_shell()
-                self._force_launch_clash(clash_pkg, retries=1, delay=1.5)
-                last_launch_attempt = time.time()
-            self.click(35, 405)  # Use inherited click
+            if time.time() - launch_started > 10.0:
+                self.logger.log("Relaunch required because: Clash Royale is neither foreground nor running")
+                self._force_launch_clash(clash_pkg, retries=1)
+                launch_started = time.time()
+            interruptible_sleep(1.0)
 
         self.logger.change_status("Timeout waiting for Clash main menu - retrying...")
         return False
 
-    def _force_launch_clash(self, package_name: str, retries: int = 3, delay: float = 2.0) -> None:
-        """Force-start Clash Royale using an explicit activity intent."""
+    def _force_launch_clash(self, package_name: str, retries: int = 1, delay: float = 2.0) -> bool:
+        """Start Clash Royale once using its canonical launcher activity."""
         activity = self._resolve_launch_activity(package_name) or f"{package_name}/.GameApp"
         for attempt in range(max(1, retries)):
             self.logger.change_status(f"Force launching Clash Royale (attempt {attempt + 1}/{retries})...")
-            # Use am start to bring the app to foreground.
-            self.adb(f"shell am start -n {activity}")
-            interruptible_sleep(delay / 2)
-            fg = self._get_foreground_package()
-            if fg:
-                self.logger.change_status(f"Foreground app: {fg}")
-                if fg == package_name:
-                    break
-            # Fallback: try monkey launcher
-            self.adb(f"shell monkey -p {package_name} -c android.intent.category.LAUNCHER 1")
+            result = self.adb(
+                f"shell am start -W -a android.intent.action.MAIN "
+                f"-c android.intent.category.LAUNCHER -n {activity}"
+            )
             interruptible_sleep(delay)
+            fg = self._get_foreground_package()
+            ok = result.returncode == 0 and fg == package_name
+            self.logger.log(f"Clash Royale foreground: {ok} ({fg}) after launcher intent")
+            if ok:
+                return True
+        return False
+
+    def _is_clash_process_running(self, package_name: str) -> bool:
+        result = self.adb(f"shell pidof {package_name}")
+        return bool((result.stdout or "").strip())
+
+    def _has_rendered_frame(self) -> bool:
+        try:
+            image = self.screenshot()
+            return bool(image.size and int(image.max()) > 8)
+        except Exception:
+            return False
 
     def _force_stop_store_shell(self) -> None:
         """Best-effort stop of BlueStacks store shell apps that can steal focus."""
@@ -870,16 +927,40 @@ class BlueStacksEmulatorController(AdbBasedController):
         return None
 
     def _get_foreground_package(self) -> str | None:
-        """Best-effort read of the current foreground package."""
-        result = self.adb("shell dumpsys window windows")
-        text = (result.stdout or "") if hasattr(result, "stdout") else ""
-        if not text:
-            return None
-        for line in text.splitlines():
-            if "mCurrentFocus" in line or "mFocusedApp" in line or "mResumedActivity" in line:
-                m = re.search(r"([A-Za-z0-9._]+)/[A-Za-z0-9._$]+", line)
-                if m:
-                    return m.group(1)
+        """Return the foreground package using modern and legacy Android sources."""
+        component = self._get_foreground_component()
+        return component[0] if component else None
+
+    def _get_foreground_component(self) -> tuple[str, str] | None:
+        """Return ``(package, activity)`` from Android foreground-state output."""
+        sources = (
+            "shell dumpsys activity activities",
+            "shell dumpsys activity top",
+            "shell dumpsys window windows",
+            "shell dumpsys window",
+            "shell dumpsys input",
+        )
+        markers = (
+            "topResumedActivity",
+            "mResumedActivity",
+            "ResumedActivity",
+            "topActivity",
+            "mCurrentFocus",
+            "mFocusedApp",
+        )
+        for command in sources:
+            result = self.adb(command)
+            text = (result.stdout or "") if hasattr(result, "stdout") else ""
+            for line in text.splitlines():
+                if not any(marker in line for marker in markers):
+                    continue
+                # Handles ActivityRecord/Window forms and optional name= prefixes.
+                match = re.search(r"([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_$]+)+)/([A-Za-z0-9_.$]+)", line)
+                if match:
+                    return match.group(1), match.group(2)
+        logger = getattr(self, "logger", None)
+        if logger is not None and hasattr(logger, "log"):
+            logger.log("Unable to resolve foreground activity from Android activity/window/input dumpsys output")
         return None
 
     # click() is now inherited from AdbBasedController

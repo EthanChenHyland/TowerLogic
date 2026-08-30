@@ -221,7 +221,7 @@ class MemuEmulatorController(BaseEmulatorController):
         """
         debug_config_read = DEBUG_CONFIGURATION.get("config_read", False)
 
-        config_file_path = r"towerlogic\emulators\configs\memu_config.json"
+        config_file_path = os.path.join(os.path.dirname(__file__), "configs", "memu_config.json")
 
         if debug_config_read:
             self.logger.log("[CONFIG] =======================================================")
@@ -1419,6 +1419,11 @@ class MemuEmulatorController(BaseEmulatorController):
         return True
 
     def click(self, x_coord, y_coord, clicks=1, interval=0.1):
+        if self.dry_run_enabled():
+            self.log_suppressed_input(
+                f"tap x={x_coord} y={y_coord} clicks={max(1, clicks)} interval={max(0.0, interval):g}s"
+            )
+            return
         if clicks == 1:
             self.pmc.send_adb_command_vm(
                 vm_index=self.vm_index,
@@ -1450,6 +1455,11 @@ class MemuEmulatorController(BaseEmulatorController):
             y_coord2 (int): Y coordinate of the end of the swipe
 
         """
+        if self.dry_run_enabled():
+            self.log_suppressed_input(
+                f"swipe ({x_coord1},{y_coord1})->({x_coord2},{y_coord2})"
+            )
+            return
         self.pmc.send_adb_command_vm(
             vm_index=self.vm_index,
             command=f"shell input swipe {x_coord1} {y_coord1} {x_coord2} {y_coord2}",

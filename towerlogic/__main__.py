@@ -6,7 +6,7 @@ import locale
 import multiprocessing as mp
 import subprocess
 from multiprocessing import Event, Queue
-from os.path import expandvars, join
+from os.path import join
 from typing import TYPE_CHECKING, Any
 
 _original_setlocale = locale.setlocale
@@ -38,7 +38,7 @@ from towerlogic.utils.caching import USER_SETTINGS_CACHE
 from towerlogic.utils.cli_config import arg_parser
 from towerlogic.utils.logger import Logger, initalize_pylogging, log_dir
 from towerlogic.utils.open_folder import open_folder
-from towerlogic.utils.platform import is_macos
+from towerlogic.utils.platform import get_app_data_dir, is_macos
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -229,7 +229,7 @@ def handle_process_finished(
 
 
 def open_recordings_folder() -> None:
-    folder_path = join(expandvars("%localappdata%"), "programs", "TowerLogic", "recordings")
+    folder_path = join(get_app_data_dir("TowerLogic"), "recordings")
     open_folder(folder_path)
 
 

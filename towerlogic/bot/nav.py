@@ -245,21 +245,18 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True) -> 
     return True
 
 
-def check_if_on_clash_main_menu(emulator) -> bool:
-    """Checks if the user is on the clash main menu.
-    Returns True if on main menu, False if not.
-    """
-    image = emulator.screenshot()
-    pixels = [
-        image[14][209],  # white
-        image[14][325],  # white
-        image[19][298],  # yellow
-        image[17][399],  # green
-        image[581][261],  # green
-        image[584][166],  # bluegrey
-        image[621][166],  # bluegrey
-    ]
-
+def inspect_clash_main_menu(image) -> tuple[bool, list[list[int]], list[list[bool]]]:
+    """Evaluate the legacy main-menu pixel signature and expose diagnostics."""
+    if image is None or getattr(image, "ndim", 0) < 2:
+        return False, [], []
+    coords = [(14, 209), (14, 325), (19, 298), (17, 399),
+              (581, 261), (584, 166), (621, 166)]
+    try:
+        if image.shape[0] <= max(y for y, _ in coords) or image.shape[1] <= max(x for _, x in coords):
+            return False, [], []
+        pixels = [image[y][x].tolist() for y, x in coords]
+    except (AttributeError, IndexError, TypeError):
+        return False, [], []
     # google play colors
     colors_1 = [
         [255, 255, 255],
@@ -295,15 +292,46 @@ def check_if_on_clash_main_menu(emulator) -> bool:
     #         "{:^15} | {:^15} | {:^15}".format(seen_pixel, google_play_color, memu_color)
     #     )
 
-    for colors in [colors_1, colors_2]:
-        if all_pixels_are_equal(
-            pixels,
-            colors,
-            25,
-        ):
-            return True
+    matches = [[pixel_is_equal(pixel, expected, tol=25) for pixel, expected in zip(pixels, colors)]
+               for colors in (colors_1, colors_2)]
+    return any(all(row) for row in matches), pixels, matches
 
-    return False
+
+def check_if_on_clash_main_menu(emulator) -> bool:
+    """Checks if the user is on the clash main menu."""
+    image = emulator.screenshot()
+    legacy = inspect_clash_main_menu(image)[0]
+    current, _ = detect_current_clash_main_menu(image)
+    return legacy or current
+
+
+def detect_current_clash_main_menu(image) -> tuple[bool, dict[str, float | bool]]:
+    """Detect current UI using stable trophy-road and battle-button cues.
+
+    These elements are static on the home screen and are absent from loading
+    and battle views.  The legacy seven-pixel signature remains a separate
+    fallback in ``inspect_clash_main_menu``.
+    """
+    if image is None or getattr(image, "ndim", 0) < 2:
+        return False, {"trophy_template_match": False, "trophy_score": 0.0,
+                       "battle_button_score": 0.0}
+    trophy_match = find_image(
+        image, "selected_trophy_road_on_main", tolerance=0.80,
+        subcrop=(250, 430, 419, 575),
+    ) is not None
+    # The central Battle button has a large, stable yellow/orange surface.
+    region = image[455:535, 135:285]
+    if region.size == 0:
+        battle_score = 0.0
+    else:
+        # Screenshots are BGR; yellow/orange pixels have high G and R.
+        battle_score = float(((region[..., 1] > 120) & (region[..., 2] > 170)).mean())
+    details = {
+        "trophy_template_match": trophy_match,
+        "trophy_score": 1.0 if trophy_match else 0.0,
+        "battle_button_score": battle_score,
+    }
+    return trophy_match and battle_score >= 0.20, details
 
 
 def get_to_card_page_from_clash_main(

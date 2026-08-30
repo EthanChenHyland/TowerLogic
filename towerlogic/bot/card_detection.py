@@ -6309,12 +6309,11 @@ _CARD_TEMPLATE_SOURCE: str | None = None
 
 def _dataset_dirs() -> list[str]:
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    base = os.path.join(project_root, "cards")
-    return [
-        os.path.join(base, "train"),
-        os.path.join(base, "valid"),
-        os.path.join(base, "test"),
-    ]
+    for dataset_name in ("cards_deck", "cards"):
+        base = os.path.join(project_root, dataset_name)
+        if os.path.isdir(base):
+            return [os.path.join(base, split) for split in ("train", "valid", "test")]
+    return []
 
 
 def _load_card_templates() -> list[tuple[str, numpy.ndarray]]:

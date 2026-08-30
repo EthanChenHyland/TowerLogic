@@ -179,7 +179,7 @@ def train(args: argparse.Namespace):
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
-        pin_memory=(device.type != "cpu"),
+        pin_memory=(device.type == "cuda"),
     )
     val_ds = RemappedImageFolder(val_raw, train_ds.class_to_idx)
     if len(val_ds) == 0:
@@ -190,7 +190,7 @@ def train(args: argparse.Namespace):
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
-        pin_memory=(device.type != "cpu"),
+        pin_memory=(device.type == "cuda"),
     )
 
     best_acc = 0.0

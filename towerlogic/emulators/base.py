@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 
 from towerlogic.utils.platform import CURRENT_PLATFORM, Platform
@@ -10,6 +12,20 @@ class BaseEmulatorController:
     """
 
     supported_platforms: list[Platform] = []
+
+    @staticmethod
+    def dry_run_enabled() -> bool:
+        """Return whether emulator input should be logged instead of sent."""
+        return os.getenv("TOWERLOGIC_DRY_RUN", "").strip().lower() in {"1", "true", "yes", "on"}
+
+    def log_suppressed_input(self, action: str) -> None:
+        """Log an input that was intentionally suppressed by dry-run mode."""
+        message = f"[DRY RUN] Suppressed emulator input: {action}"
+        logger = getattr(self, "logger", None)
+        if logger is not None and hasattr(logger, "log"):
+            logger.log(message)
+        else:
+            print(message)
 
     @classmethod
     def is_supported_on_current_platform(cls) -> bool:

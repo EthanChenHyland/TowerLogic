@@ -1,0 +1,16 @@
+.venv/
+*.egg-info/
+venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+._*
+__MACOSX/
+
+# Runtime output and local state
+runs/
+recordings/
+*.log
+
+# Local model exports/checkpoints (keep explicitly documented production models tracked)
+*.onnx

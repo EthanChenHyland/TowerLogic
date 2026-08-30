@@ -58,6 +58,11 @@ class AdbBasedController(BaseEmulatorController, ABC):
 
     def click(self, x_coord: int, y_coord: int, clicks: int = 1, interval: float = 0.0):
         """Click on the screen using ADB input tap."""
+        if self.dry_run_enabled():
+            self.log_suppressed_input(
+                f"tap x={x_coord} y={y_coord} clicks={max(1, clicks)} interval={max(0.0, interval):g}s"
+            )
+            return
         for _ in range(max(1, clicks)):
             self.adb(f"shell input tap {x_coord} {y_coord}")
             if clicks > 1:
@@ -65,6 +70,11 @@ class AdbBasedController(BaseEmulatorController, ABC):
 
     def swipe(self, x_coord1: int, y_coord1: int, x_coord2: int, y_coord2: int):
         """Swipe on the screen using ADB input swipe."""
+        if self.dry_run_enabled():
+            self.log_suppressed_input(
+                f"swipe ({x_coord1},{y_coord1})->({x_coord2},{y_coord2})"
+            )
+            return
         self.adb(f"shell input swipe {x_coord1} {y_coord1} {x_coord2} {y_coord2}")
 
     def screenshot(self) -> np.ndarray:
