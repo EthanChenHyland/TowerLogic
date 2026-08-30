@@ -1,0 +1,22 @@
+{
+  "raw_class_names": [
+    "archers",
+    "giant",
+    "goblin cage",
+    "mini pekka",
+    "minions",
+    "musketeer",
+    "skeletons",
+    "valkyrie"
+  ],
+  "class_names": [
+    "archers",
+    "giant",
+    "goblin_cage",
+    "mini_pekka",
+    "minions",
+    "musketeer",
+    "skeletons",
+    "valkyrie"
+  ]
+}
