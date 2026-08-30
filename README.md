@@ -267,12 +267,6 @@ Activate it.
 source .venv/bin/activate
 ```
 
-### Windows
-
-```powershell
-.venv\Scripts\activate
-```
-
 Install the core project:
 
 ```bash
