@@ -11,7 +11,9 @@ from os.path import normpath
 import cv2
 
 from towerlogic.bot.nav import (
+    check_for_trophy_box_reward,
     check_if_in_battle,
+    clear_trophy_box_reward,
     detect_current_clash_main_menu,
     inspect_clash_main_menu,
 )
@@ -809,6 +811,7 @@ class BlueStacksEmulatorController(AdbBasedController):
             detector_used = "none"
             current_details = {}
             menu_pixels, menu_matches = [], []
+            readiness_image = None
             try:
                 readiness_image = self.screenshot()
                 screenshot_available = readiness_image is not None
@@ -822,7 +825,11 @@ class BlueStacksEmulatorController(AdbBasedController):
             except Exception as exc:
                 self.logger.log(f"Startup readiness screenshot failed: {exc}")
 
-            battle_detected = check_if_in_battle(self) if screenshot_available else False
+            battle_detected = check_if_in_battle(self, image=readiness_image) if screenshot_available else False
+            trophy_box_detected = (
+                check_for_trophy_box_reward(self, image=readiness_image)
+                if rendered else False
+            )
             self.logger.log(f"process_exists={process_running}")
             self.logger.log(f"foreground_detected={foreground == clash_pkg}")
             self.logger.log(f"foreground_package={foreground}")
@@ -832,6 +839,7 @@ class BlueStacksEmulatorController(AdbBasedController):
             self.logger.log(f"main_menu_detector={detector_used}")
             self.logger.log(f"main_menu_match_scores={current_details}")
             self.logger.log(f"battle_detected={battle_detected}")
+            self.logger.log(f"trophy_box_detected={trophy_box_detected}")
             self.logger.log(f"launch_age={time.time() - launch_started:.1f}s")
             self.logger.log(f"startup_timeout_remaining={max(0.0, deadline - time.time()):.1f}s")
             if screenshot_available and not main_menu:
@@ -843,6 +851,33 @@ class BlueStacksEmulatorController(AdbBasedController):
                 dur = f"{time.time() - start_ts:.1f}s"
                 self.logger.log(f"BlueStacks 5 restart completed in {dur}")
                 return True
+            if trophy_box_detected:
+                self.logger.log("Trophy box detected during startup; attempting recovery...")
+                recovery_state = clear_trophy_box_reward(self, self.logger)
+                self.logger.log(f"Startup trophy-box recovery result: {recovery_state}")
+
+                # Re-evaluate a fresh frame immediately; the reward flow may
+                # end at the main menu, a battle, or another reward screen.
+                try:
+                    fresh_image = self.screenshot()
+                    fresh_legacy = inspect_clash_main_menu(fresh_image)[0]
+                    fresh_current = detect_current_clash_main_menu(fresh_image)[0]
+                    fresh_main_menu = fresh_legacy or fresh_current
+                    fresh_battle = check_if_in_battle(self, image=fresh_image)
+                    fresh_trophy_box = check_for_trophy_box_reward(self, image=fresh_image)
+                    self.logger.log(f"post_recovery_main_menu={fresh_main_menu}")
+                    self.logger.log(f"post_recovery_battle={fresh_battle}")
+                    self.logger.log(f"post_recovery_trophy_box={fresh_trophy_box}")
+                    if fresh_main_menu:
+                        self.logger.change_status("Clash Royale main menu detected")
+                        dur = f"{time.time() - start_ts:.1f}s"
+                        self.logger.log(f"BlueStacks 5 restart completed in {dur}")
+                        return True
+                    if fresh_battle:
+                        self.logger.change_status("Battle detected after trophy-box recovery")
+                except Exception as exc:
+                    self.logger.log(f"Post-recovery state check failed: {exc}")
+                continue
             if battle_detected:
                 self.logger.change_status("Battle detected; waiting for it to finish before relaunching...")
                 interruptible_sleep(3)

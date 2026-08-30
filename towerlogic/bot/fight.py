@@ -50,6 +50,7 @@ from towerlogic.bot.nav import (
     check_if_battle_has_ended,
     check_if_in_battle,
     check_if_on_clash_main_menu,
+    clear_trophy_box_reward,
     get_to_activity_log,
     handle_trophy_reward_menu,
     wait_for_battle_start,
@@ -349,6 +350,9 @@ def wait_for_elixer(
             return "restart"
 
         if not check_for_in_battle_with_delay(emulator):
+            if clear_trophy_box_reward(emulator, logger) == "battle":
+                battle_detection_lost_count = 0
+                continue
             if check_if_battle_has_ended(emulator):
                 logger.change_status(status="Not in battle anymore (confirmed), stopping waiting for elixir.")
                 return "no battle"
@@ -3142,6 +3146,9 @@ def _fight_loop(emulator, logger: Logger, recording_flag: bool, policy_cfg: dict
 
     while True:
         if not check_for_in_battle_with_delay(emulator):
+            if clear_trophy_box_reward(emulator, logger) == "battle":
+                battle_detection_lost_count = 0
+                continue
             if check_if_battle_has_ended(emulator):
                 break
 
@@ -3239,6 +3246,9 @@ def _random_fight_loop(emulator, logger) -> bool:
     # while in battle:
     while True:
         if not check_for_in_battle_with_delay(emulator):
+            if clear_trophy_box_reward(emulator, logger) == "battle":
+                battle_detection_lost_count = 0
+                continue
             if check_if_battle_has_ended(emulator):
                 break
 

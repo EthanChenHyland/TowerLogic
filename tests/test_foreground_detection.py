@@ -77,11 +77,15 @@ class ForegroundDetectionTests(unittest.TestCase):
         self.assertTrue(all(matches[0]))
 
     def test_current_ui_detector_matches_captured_menu_and_rejects_blank(self):
-        menu = __import__("cv2").imread("/tmp/towerlogic-startup-readiness.png")
-        if menu is not None:
-            recognized, details = detect_current_clash_main_menu(menu)
-            self.assertTrue(recognized)
-            self.assertGreaterEqual(details["battle_button_score"], 0.20)
+        cv2 = __import__("cv2")
+        menu = np.zeros((633, 419, 3), dtype=np.uint8)
+        menu[455:535, 135:285] = (0, 200, 255)
+        trophy = cv2.imread("towerlogic/detection/reference_images/selected_trophy_road_on_main/4.png")
+        h, w = trophy.shape[:2]
+        menu[470:470 + h, 295:295 + w] = trophy
+        recognized, details = detect_current_clash_main_menu(menu)
+        self.assertTrue(recognized)
+        self.assertGreaterEqual(details["battle_button_score"], 0.20)
         blank = np.zeros((633, 419, 3), dtype=np.uint8)
         recognized, details = detect_current_clash_main_menu(blank)
         self.assertFalse(recognized)

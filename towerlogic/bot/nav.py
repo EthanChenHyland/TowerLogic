@@ -2,6 +2,8 @@ import random
 import time
 from typing import Literal
 
+import cv2
+
 from towerlogic.bot.constants import CLASH_MAIN_DEADSPACE_COORD as CLASH_MAIN_MENU_DEADSPACE_COORD
 from towerlogic.detection.image_rec import (
     all_pixels_are_equal,
@@ -77,8 +79,8 @@ def check_for_in_battle_with_delay(emulator) -> bool:
     return False
 
 
-def check_if_in_battle(emulator):
-    iar_bgr = emulator.screenshot()
+def check_if_in_battle(emulator, image=None):
+    iar_bgr = image if image is not None else emulator.screenshot()
     if iar_bgr is None:
         return False
 
@@ -191,6 +193,60 @@ def check_for_trophy_reward_menu(emulator) -> bool:
             return False
 
     return True
+
+
+def check_for_trophy_box_reward(emulator, image=None) -> bool:
+    """Detect the modern blue trophy-box reward reveal screen."""
+    image = image if image is not None else emulator.screenshot()
+    if image is None or image.shape[0] < 625 or image.shape[1] < 419:
+        return False
+
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    top = hsv[0:220, 0:419]
+    center = hsv[220:410, 110:310]
+    bottom = hsv[535:625, 80:330]
+
+    blue_top = float(
+        ((top[..., 0] >= 95) & (top[..., 0] <= 125) & (top[..., 1] >= 100) & (top[..., 2] >= 40)).mean()
+    )
+    purple_center = float(
+        ((center[..., 0] >= 125) & (center[..., 0] <= 170) & (center[..., 1] >= 70) & (center[..., 2] >= 80)).mean()
+    )
+    orange_bottom = float(
+        ((bottom[..., 0] >= 5) & (bottom[..., 0] <= 30) & (bottom[..., 1] >= 100) & (bottom[..., 2] >= 120)).mean()
+    )
+    return blue_top >= 0.85 and purple_center >= 0.10 and orange_bottom >= 0.08
+
+
+def clear_trophy_box_reward(
+    emulator,
+    logger: Logger,
+    timeout: float = 20.0,
+) -> Literal["battle", "main_menu", "timeout", "not_detected"]:
+    """Click through a confirmed trophy-box flow and report its resulting state."""
+    if not check_for_trophy_box_reward(emulator):
+        return "not_detected"
+
+    logger.change_status("Trophy box reward detected; clearing reward screens...")
+    deadline = time.time() + timeout
+    attempts = 0
+    while time.time() < deadline:
+        image = emulator.screenshot()
+        if check_if_in_battle(emulator, image=image):
+            logger.change_status(f"Battle restored after clearing trophy box ({attempts} clicks)")
+            return "battle"
+        legacy_menu = inspect_clash_main_menu(image)[0]
+        current_menu = detect_current_clash_main_menu(image)[0]
+        if legacy_menu or current_menu:
+            logger.change_status(f"Main menu reached after clearing trophy box ({attempts} clicks)")
+            return "main_menu"
+        attempts += 1
+        logger.log(f"Clearing trophy box reward (click {attempts})")
+        emulator.click(209, 316)
+        interruptible_sleep(0.75)
+
+    logger.change_status(f"Timed out clearing trophy box after {attempts} clicks")
+    return "timeout"
 
 
 def handle_trophy_reward_menu(
