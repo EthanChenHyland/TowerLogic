@@ -1,4 +1,3 @@
-````markdown
 # TowerLogic
 
 TowerLogic is a Python-based Clash Royale automation and computer vision project that combines traditional image processing, PyTorch-based machine learning, YOLOv8-formatted detection data, emulator control, and automated gameplay decision logic.
