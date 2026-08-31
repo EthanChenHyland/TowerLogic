@@ -76,20 +76,41 @@ class ForegroundDetectionTests(unittest.TestCase):
         self.assertEqual(len(pixels), 7)
         self.assertTrue(all(matches[0]))
 
-    def test_current_ui_detector_matches_captured_menu_and_rejects_blank(self):
+    def test_current_ui_detector_matches_each_mode_template_and_rejects_blank(self):
         cv2 = __import__("cv2")
-        menu = np.zeros((633, 419, 3), dtype=np.uint8)
-        menu[455:535, 135:285] = (0, 200, 255)
-        trophy = cv2.imread("towerlogic/detection/reference_images/selected_trophy_road_on_main/4.png")
-        h, w = trophy.shape[:2]
-        menu[470:470 + h, 295:295 + w] = trophy
-        recognized, details = detect_current_clash_main_menu(menu)
-        self.assertTrue(recognized)
-        self.assertGreaterEqual(details["battle_button_score"], 0.20)
+        modes = {
+            "classic_1v1_template_match": "selected_1v1_on_main/1.png",
+            "classic_2v2_template_match": "selected_2v2_on_main/1.png",
+            "trophy_template_match": "selected_trophy_road_on_main/4.png",
+        }
+        for detail_key, relative_path in modes.items():
+            with self.subTest(mode=detail_key):
+                menu = np.zeros((633, 419, 3), dtype=np.uint8)
+                menu[455:535, 135:285] = (0, 200, 255)
+                template = cv2.imread(f"towerlogic/detection/reference_images/{relative_path}")
+                h, w = template.shape[:2]
+                menu[470:470 + h, 295:295 + w] = template
+                recognized, details = detect_current_clash_main_menu(menu)
+                self.assertTrue(recognized)
+                self.assertTrue(details[detail_key])
+                self.assertGreaterEqual(details["battle_button_score"], 0.20)
+
         blank = np.zeros((633, 419, 3), dtype=np.uint8)
         recognized, details = detect_current_clash_main_menu(blank)
         self.assertFalse(recognized)
-        self.assertEqual(details["trophy_score"], 0.0)
+        self.assertFalse(details["selected_mode_template_match"])
+
+    def test_current_ui_detector_accepts_current_mode_art_with_selected_battle_tab(self):
+        # Current Classic modes can use art that no longer matches the older
+        # selected-mode templates.  The shared Battle button and selected
+        # bottom Battle tab are the mode-independent home-screen cues.
+        menu = np.zeros((633, 419, 3), dtype=np.uint8)
+        menu[455:535, 135:285] = (0, 200, 255)
+        menu[572:633, 145:279] = (150, 110, 70)
+        recognized, details = detect_current_clash_main_menu(menu)
+        self.assertTrue(recognized)
+        self.assertFalse(details["selected_mode_template_match"])
+        self.assertGreaterEqual(details["battle_tab_score"], 0.45)
 
 
 if __name__ == "__main__":

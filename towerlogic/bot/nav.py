@@ -362,19 +362,40 @@ def check_if_on_clash_main_menu(emulator) -> bool:
 
 
 def detect_current_clash_main_menu(image) -> tuple[bool, dict[str, float | bool]]:
-    """Detect current UI using stable trophy-road and battle-button cues.
+    """Detect the current home screen independently of the selected mode.
 
-    These elements are static on the home screen and are absent from loading
-    and battle views.  The legacy seven-pixel signature remains a separate
-    fallback in ``inspect_clash_main_menu``.
+    The large Battle button and selected bottom Battle tab are shared by
+    Trophy Road, Classic 1v1, and Classic 2v2.  Existing selected-mode
+    templates remain useful compatibility cues, but current game art can make
+    an individual mode template stale.  The legacy seven-pixel signature
+    remains a separate fallback in ``inspect_clash_main_menu``.
     """
     if image is None or getattr(image, "ndim", 0) < 2:
-        return False, {"trophy_template_match": False, "trophy_score": 0.0,
-                       "battle_button_score": 0.0}
-    trophy_match = find_image(
-        image, "selected_trophy_road_on_main", tolerance=0.80,
-        subcrop=(250, 430, 419, 575),
-    ) is not None
+        return False, {
+            "selected_mode_template_match": False,
+            "trophy_template_match": False,
+            "classic_1v1_template_match": False,
+            "classic_2v2_template_match": False,
+            "battle_button_score": 0.0,
+            "battle_tab_score": 0.0,
+        }
+
+    mode_matches = {
+        "classic_1v1_template_match": find_image(
+            image, "selected_1v1_on_main", tolerance=0.80,
+            subcrop=(250, 430, 419, 575),
+        ) is not None,
+        "classic_2v2_template_match": find_image(
+            image, "selected_2v2_on_main", tolerance=0.80,
+            subcrop=(250, 430, 419, 575),
+        ) is not None,
+        "trophy_template_match": find_image(
+            image, "selected_trophy_road_on_main", tolerance=0.80,
+            subcrop=(250, 430, 419, 575),
+        ) is not None,
+    }
+    selected_mode_match = any(mode_matches.values())
+
     # The central Battle button has a large, stable yellow/orange surface.
     region = image[455:535, 135:285]
     if region.size == 0:
@@ -382,12 +403,30 @@ def detect_current_clash_main_menu(image) -> tuple[bool, dict[str, float | bool]
     else:
         # Screenshots are BGR; yellow/orange pixels have high G and R.
         battle_score = float(((region[..., 1] > 120) & (region[..., 2] > 170)).mean())
+
+    # The selected Battle navigation tab has a broad blue/cyan surface across
+    # all three modes.  Requiring it with the Battle button avoids accepting a
+    # loading, reward, or battle frame based on one yellow region alone.
+    tab_region = image[572:633, 145:279]
+    if tab_region.size == 0:
+        battle_tab_score = 0.0
+    else:
+        battle_tab_score = float(
+            (
+                (tab_region[..., 0] > 90)
+                & (tab_region[..., 1] > 70)
+                & (tab_region[..., 0] > tab_region[..., 2] * 1.15)
+            ).mean()
+        )
+
     details = {
-        "trophy_template_match": trophy_match,
-        "trophy_score": 1.0 if trophy_match else 0.0,
+        "selected_mode_template_match": selected_mode_match,
+        **mode_matches,
         "battle_button_score": battle_score,
+        "battle_tab_score": battle_tab_score,
     }
-    return trophy_match and battle_score >= 0.20, details
+    supporting_cue = selected_mode_match or battle_tab_score >= 0.45
+    return battle_score >= 0.20 and supporting_cue, details
 
 
 def get_to_card_page_from_clash_main(
