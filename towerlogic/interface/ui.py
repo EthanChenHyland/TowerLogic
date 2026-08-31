@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import math
 import tkinter as tk
 from contextlib import suppress
 from collections.abc import Callable
@@ -469,6 +470,19 @@ class TowerLogicUI(ttk.Window):
                 self.policy_games_var.set(str(games))
 
     def _update_policy_graph(self, values: list[float], step_values: list[float] | None) -> None:
+        def finite_series(series: list[float] | None) -> list[float]:
+            result: list[float] = []
+            for value in series or []:
+                try:
+                    number = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(number):
+                    result.append(number)
+            return result
+
+        values = finite_series(values)
+        step_values = finite_series(step_values)
         if not values and not step_values:
             self.policy_canvas.delete("all")
             return

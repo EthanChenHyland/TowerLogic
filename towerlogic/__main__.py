@@ -7,6 +7,7 @@ import multiprocessing as mp
 import subprocess
 from multiprocessing import Event, Queue
 from os.path import join
+from queue import Empty
 from typing import TYPE_CHECKING, Any
 
 _original_setlocale = locale.setlocale
@@ -221,8 +222,9 @@ def handle_process_finished(
     """Check if the worker process has finished and reset UI state if so."""
     if process is not None and not process.is_alive():
         ui.set_button_state("idle")
-        # Reset to a fresh logger for the next run
-        logger = Logger(timed=False)
+        # Keep the completed run's metrics visible on the Analytics tab.  A
+        # fresh logger here discarded the policy graph exactly when a worker
+        # finished; _on_start creates a fresh logger for the next run.
         logger.change_status("Idle")
         process = None
     return process, logger
@@ -363,8 +365,10 @@ class BotApplication:
                     if "current_status" in stats:
                         self.logger.current_status = stats["current_status"]
                     self.logger.stats.update(stats)
-            except Exception:
+            except Empty:
                 pass  # Queue empty
+            except (EOFError, OSError) as exc:
+                self.logger.log(f"Stats queue unavailable: {exc}")
 
         self.process, self.logger = handle_process_finished(self.ui, self.process, self.logger)
         update_layout(self.ui, self.logger)

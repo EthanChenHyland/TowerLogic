@@ -97,6 +97,26 @@ def _require_torch():
         ) from _IMPORT_ERROR
 
 
+def _opencv_image_to_pil(image):
+    """Convert an OpenCV BGR/BGRA array to the RGB PIL input used by the model.
+
+    Screenshots and hand crops in the runtime are decoded by OpenCV.  PIL
+    interprets a three-channel array as RGB, so passing the crop through
+    unchanged silently swaps red and blue and changes classifier predictions.
+    Grayscale and already-PIL inputs remain supported for callers outside the
+    runtime path.
+    """
+    if Image is None:
+        raise RuntimeError("Pillow is required for hand-card classification") from _IMPORT_ERROR
+    if isinstance(image, Image.Image):
+        return image.convert("RGB")
+    array = image
+    if getattr(array, "ndim", 0) == 3 and array.shape[2] >= 3:
+        array = array[..., :3][..., ::-1]
+    # PIL does not accept negative-stride views on all supported versions.
+    return Image.fromarray(array.copy() if hasattr(array, "copy") else array)
+
+
 @dataclass
 class HandClassifier:
     model: "torch.nn.Module"
@@ -111,7 +131,7 @@ class HandClassifier:
         if torch is None:
             raise RuntimeError("Torch is required for hand-card classification") from _IMPORT_ERROR
 
-        pil_image = Image.fromarray(image)
+        pil_image = _opencv_image_to_pil(image)
         tensor = self.transform(pil_image).unsqueeze(0).to(self.device)
         with torch.no_grad():
             logits = self.model(tensor)
@@ -126,7 +146,7 @@ class HandClassifier:
             raise RuntimeError("Torch is required for hand-card classification") from _IMPORT_ERROR
 
         k = max(1, int(k))
-        pil_image = Image.fromarray(image)
+        pil_image = _opencv_image_to_pil(image)
         tensor = self.transform(pil_image).unsqueeze(0).to(self.device)
         with torch.no_grad():
             logits = self.model(tensor)

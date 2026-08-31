@@ -11,6 +11,7 @@ __MACOSX/
 runs/
 recordings/
 *.log
+*.cache
 
 # Local model exports/checkpoints (keep explicitly documented production models tracked)
 *.onnx

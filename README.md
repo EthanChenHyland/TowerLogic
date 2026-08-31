@@ -1,315 +1,179 @@
 # TowerLogic
 
-TowerLogic is a Python-based Clash Royale automation and computer vision project that combines traditional image processing, PyTorch-based machine learning, YOLOv8-formatted detection data, emulator control, and automated gameplay decision logic.
+TowerLogic is an experimental Clash Royale automation and game-state analysis
+project. It combines screenshot-based computer vision, small learned models,
+template matching, policy scoring, and Android emulator control behind a
+desktop GUI.
 
-The project was developed iteratively over several months as an experimentation platform for interpreting live game-state information and using those observations to support automated actions during Clash Royale matches.
+It is a research/portfolio project, not a production bot and not an official
+Supercell project.
 
-## Overview
+## What it does
 
-TowerLogic attempts to convert live Clash Royale gameplay into structured information that can be used by an automated policy.
-
-The project includes several complementary approaches:
-
-- computer vision and image recognition for game-state detection
-- a trained PyTorch classifier for identifying cards in the player hand
-- YOLOv8-formatted object-detection data for arena/game elements
-- state-vector construction from gameplay information
-- policy-based card and placement selection
-- emulator and ADB integration for interacting with the game
-- a desktop graphical interface for configuring and monitoring runs
-
-Rather than relying on a single model, TowerLogic combines learned models, image-processing techniques, and rule/policy logic into one gameplay pipeline.
-
-## Key Features
-
-### Machine Learning
-
-TowerLogic includes a PyTorch training pipeline for classifying cards from gameplay images.
-
-The classifier workflow includes:
-
-- training and validation datasets loaded with `torchvision.datasets.ImageFolder`
-- image resizing and normalization
-- light color augmentation during training
-- cross-entropy loss
-- Adam optimization
-- automatic CPU, CUDA, or Apple Silicon MPS device selection
-- validation accuracy tracking
-- checkpointing of the best-performing model
-- exported class-name mappings for inference
-
-A trained hand-card classifier and corresponding class map are included under:
+The runtime follows this path:
 
 ```text
-towerlogic/models/
-````
-
-The training utility is located at:
-
-```text
-scripts/train_hand_classifier.py
+BlueStacks/ADB screenshot
+        -> navigation and battle-state checks
+        -> hand-card recognition and field-object detection
+        -> normalized game-state vector
+        -> candidate placements and policy/heuristic scoring
+        -> intended card + coordinate
+        -> emulator input (or a logged dry-run action)
 ```
 
-### Computer Vision
+The GUI configures the worker process, displays runtime statistics, and shows
+in-memory learning progress. The worker owns the emulator and communicates
+status through a multiprocessing queue.
 
-The project uses OpenCV and NumPy throughout its visual-processing pipeline.
+## Technologies
 
-TowerLogic includes:
+- Python 3.12–3.14
+- OpenCV and NumPy for screenshots, color/region checks, templates, and image preprocessing
+- PyTorch and torchvision for the hand-card classifier and policy network
+- ONNX Runtime for the field/object detector
+- ttkbootstrap/Tkinter for the desktop GUI
+- ADB and emulator-specific adapters for device control
+- `ultralytics` only for optional YOLO training/export experiments
 
-* gameplay screenshot analysis
-* card-template matching
-* card and interface recognition
-* image preprocessing
-* game-state visual detection
-* debugging and detection utilities
+## ML and computer vision
 
-The repository also contains a YOLOv8-format Clash Royale dataset used for computer-vision experimentation.
+### Hand-card classifier
 
-### YOLOv8 Dataset
+`towerlogic/models/hand_card_classifier.pt` is a compact PyTorch image
+classifier. Its class map is stored in
+`towerlogic/models/hand_card_classifier.class_map.json`. Runtime crops are
+converted from OpenCV BGR to RGB, resized to the checkpoint's input size, and
+normalized with the same `.5/.5` transform used by training.
 
-The included detection dataset contains:
+The repository also contains card templates under
+`towerlogic/bot/detection/card_templates/`. Template matching is a deterministic
+fallback/diagnostic path; classifier use is controlled by
+`PYCLASHBOT_HAND_USE_CLASSIFIER=1`.
 
-* 1,792 annotated images
-* YOLOv8-format labels
-* annotations covering cards, HP bars, towers, and related game elements
+### Field detector
 
-The dataset was exported from Roboflow and is provided under **CC BY 4.0**.
+`towerlogic/models/field_detector.onnx` is the runtime detector. The matching
+PyTorch checkpoint is retained as `towerlogic/models/field_detector.pt` for
+experiments. The detector uses a 640×640 RGB float32 input, decodes YOLO-style
+`xywh` predictions, applies confidence filtering and NMS, and maps boxes back
+to the source screenshot. The current runtime selects ONNX Runtime's CPU
+provider for predictable macOS behavior.
 
-Original dataset:
+The YOLO-format dataset in `Clash royale.v6i.yolov8/` is included for
+experimentation and is attributed to its Roboflow export. It is not required
+to run the packaged inference path.
 
-[https://universe.roboflow.com/angelfire/clash-royale-cylln](https://universe.roboflow.com/angelfire/clash-royale-cylln)
+### Policy
 
-See the dataset documentation under:
+`models/policy.pt` contains the trained `SimplePolicyNet` state dictionary. The
+runtime builds a 26-value normalized game-state vector and appends a 4-value
+candidate-action vector (card index, card group, normalized x/y), for a
+30-value model input. The network scores candidate actions; rule-based masks
+still enforce elixir, arena, lane, and defensive constraints.
 
-```text
-Clash royale.v6i.yolov8/
+The checkpoint is tracked because it is part of the demo artifact. Training is
+optional and writes updates to the configured checkpoint path, so keep training
+disabled when you want a reproducible clean checkout.
+
+## Safety: dry-run mode
+
+Set `TOWERLOGIC_DRY_RUN=1` to run the complete screenshot, recognition, policy,
+and navigation pipeline while suppressing emulator gameplay input:
+
+```bash
+TOWERLOGIC_DRY_RUN=1 python -m towerlogic --start
 ```
 
-for the original attribution and licensing information.
+In dry-run mode, the shared ADB controller and the MEmu controller log every
+tap/click/swipe instead of issuing `shell input tap` or `shell input swipe`.
+Screenshots, ADB queries, app launch commands, and display configuration are
+not gameplay input and are not suppressed. Do not treat dry-run as an
+anti-cheat or game-policy guarantee; it is a local safety switch for this
+project's input methods.
 
-### Gameplay Policy
+## Setup
 
-TowerLogic includes an experimental gameplay policy that transforms detected game-state information into candidate actions.
-
-The policy state can incorporate information such as:
-
-* elapsed match time
-* current elixir
-* preferred lane
-* available cards
-* detected enemy activity
-* win-condition availability
-* tower health
-* recent tower-health changes
-* lane bias
-* defensive state
-* crown differential
-
-The policy can then evaluate:
-
-* which card to play
-* which side of the arena to use
-* candidate placement coordinates
-* safe placement bounds
-* spell and unit-specific placement behavior
-
-Card placements can use either predefined candidate positions or dynamically sampled coordinates within safe arena regions.
-
-## Automated Decision Logic
-
-TowerLogic combines visual detections and structured game-state information with gameplay decision logic.
-
-The system supports:
-
-* card-selection decisions
-* placement-coordinate selection
-* lane preferences
-* defensive behavior
-* elixir-based restrictions
-* card-group-specific placement behavior
-* optional learned-policy behavior
-* configurable exploration settings
-
-The project also includes saved policy model checkpoints under:
-
-```text
-models/
-```
-
-These were used during experimentation with learned gameplay behavior.
-
-## Card Recognition
-
-In addition to machine-learning-based classification, TowerLogic contains a collection of card-reference templates used by the image-recognition pipeline.
-
-These templates allow the project to compare live screen regions against known visual references when appropriate.
-
-This hybrid approach makes it possible to experiment with both:
-
-* deterministic/template-based recognition
-* learned image classification
-
-rather than relying exclusively on one detection method.
-
-## Emulator Support
-
-TowerLogic includes support for multiple Android-emulation and device-control environments.
-
-The codebase contains integration for:
-
-* MEmu
-* BlueStacks
-* Google Play Games
-* generic ADB-connected devices
-
-The emulator layer is responsible for launching or connecting to a game environment and providing the interaction surface needed by the automation system.
-
-## User Interface
-
-TowerLogic includes a desktop GUI built with `ttkbootstrap`.
-
-The interface provides configuration for:
-
-* emulator selection
-* gameplay job selection
-* deck cycling/randomization
-* battle modes
-* fight recording
-* policy-model settings
-* exploration parameters
-* training behavior
-* placement behavior
-* detection debugging
-* rendering options
-* runtime status and analytics
-
-The interface passes the selected configuration to a separate worker process that runs the automation pipeline.
-
-## Architecture
-
-A simplified project structure looks like this:
-
-```text
-TowerLogic/
-├── towerlogic/
-│   ├── bot/
-│   │   ├── detection/
-│   │   ├── card_detection.py
-│   │   ├── fight.py
-│   │   ├── policy.py
-│   │   ├── worker.py
-│   │   └── ...
-│   ├── emulators/
-│   │   ├── adb.py
-│   │   ├── bluestacks.py
-│   │   ├── google_play.py
-│   │   └── memu.py
-│   ├── interface/
-│   │   ├── ui.py
-│   │   ├── config.py
-│   │   └── ...
-│   ├── models/
-│   │   ├── hand_card_classifier.pt
-│   │   └── hand_card_classifier.class_map.json
-│   ├── utils/
-│   ├── __init__.py
-│   └── __main__.py
-├── scripts/
-│   └── train_hand_classifier.py
-├── models/
-│   ├── policy.pt
-│   └── policy_backup_2026-03-24.pt
-├── Clash royale.v6i.yolov8/
-├── pyproject.toml
-└── run_bot.sh
-```
-
-## Tech Stack
-
-### Core
-
-* Python 3.12–3.14 (the project metadata enforces this range)
-* OpenCV
-* NumPy
-* Pillow
-* ttkbootstrap
-
-### Machine Learning
-
-* PyTorch and torchvision (optional; hand classification and policy training)
-* ONNX Runtime (optional; field detector inference)
-* YOLOv8-format datasets
-* image classification
-* computer vision
-* object-detection experimentation
-
-### Automation / Integration
-
-* ADB
-* MEmu integration
-* BlueStacks integration
-* Google Play Games integration
-* multiprocessing
-
-## Installation
-
-The repository has no lockfile, so an exact historical environment cannot be reconstructed. On Apple Silicon, use a supported Python and recreate the environment from `pyproject.toml`:
+The project uses `pyproject.toml` and does not ship a lockfile. Recreate the
+environment with a supported Python version:
 
 ```bash
 brew install python@3.12 python-tk@3.12 android-platform-tools
 /opt/homebrew/bin/python3.12 -m venv .venv
-```
-
-Activate it.
-
-### macOS / Linux
-
-```bash
 source .venv/bin/activate
-```
-
-Install the core project:
-
-```bash
 python -m pip install --upgrade pip
-python -m pip install -e .
-```
-
-For machine-learning functionality, also install the optional ML dependencies:
-
-```bash
 python -m pip install -e ".[ml]"
 ```
 
-For YOLO training/export experiments, install the separate optional extra:
+Install the optional YOLO tooling only when needed:
 
 ```bash
 python -m pip install -e ".[yolo]"
 ```
 
-## Running TowerLogic
+The core GUI imports without the ML extra, but hand classification, policy
+inference/training, and ONNX detection require the `[ml]` extra.
 
-TowerLogic exposes its main interface through the Python module:
+## BlueStacks Air on macOS
+
+The validated macOS path uses BlueStacks Air with the `Tiramisu64` instance,
+the bundled `hd-adb`, and a private ADB server (port `5041`). The controller
+reads the instance's ADB port from `bluestacks.conf`; it does not require the
+legacy `MimMetaData.json` file. The usual device serial is
+`127.0.0.1:<instance-port>`.
+
+TowerLogic's visual coordinate space is **419×633**. The BlueStacks controller
+configures that framebuffer and uses its own default density of **320**; the
+old project documentation's blanket “density 160” statement was not correct
+for the validated BlueStacks Air path. Keep the emulator/controller settings
+consistent and verify the startup log before a run.
+
+Renderer names are BlueStacks-version and machine dependent. On macOS the GUI
+offers OpenGL and Vulkan; the controller's fallback is Vulkan. Use the setting
+that produces a rendered frame on the installed BlueStacks version and keep it
+unchanged during a dry run. A black surface is a renderer/startup problem, not
+an ML result.
+
+The controller resolves the Clash Royale launcher activity using Android's
+package manager and starts it with a canonical `MAIN`/`LAUNCHER` intent. It
+waits for a foreground, rendered state and recognizes both current and legacy
+main-menu signatures. Modern reward/trophy-box screens are detected and use
+the existing bounded recovery path.
+
+No emulator, APK, Android game installation, ADB device, or BlueStacks license
+is bundled with this repository. Clash Royale must already be installed in the
+emulator, and its use must comply with applicable third-party terms.
+
+## Running
+
+Launch the GUI without automatically starting a job:
 
 ```bash
+source .venv/bin/activate
 python -m towerlogic
 ```
 
-The repository also contains:
+Launch the GUI and start the selected jobs in safe mode:
+
+```bash
+source .venv/bin/activate
+TOWERLOGIC_DRY_RUN=1 python -m towerlogic --start
+```
+
+The convenience script uses the repository's `.venv`:
 
 ```bash
 bash run_bot.sh
 ```
 
-for launching the project in supported local environments.
+For a first real-input run, remove `TOWERLOGIC_DRY_RUN` only after manually
+checking the emulator, screen dimensions, renderer, selected jobs, and target
+coordinates. Real gameplay is intentionally not the default.
 
-The GUI can start on macOS, but a bot run requires a reachable ADB device, Clash Royale installed and configured, and a 419×633 / density-160 screen. Generic ADB is cross-platform; MEmu and Google Play Games Developer Emulator are Windows-only. BlueStacks is conditional on the installed version matching the controller's expected layout.
+## Training the hand classifier
 
-## Training the Hand-Card Classifier
-
-The included classifier-training utility expects an ImageFolder-style dataset with train and validation directories.
-
-Example:
+The training utility expects an ImageFolder-style directory with `train/` and
+`valid/` class folders:
 
 ```bash
 python scripts/train_hand_classifier.py \
@@ -318,109 +182,104 @@ python scripts/train_hand_classifier.py \
   --batch-size 64
 ```
 
-The script:
+The script selects Apple MPS when available, then CUDA or CPU, validates after
+each epoch, and writes the best checkpoint and class map to the requested
+output locations. Training data is not required for runtime inference because
+the current classifier checkpoint and class map are included.
 
-1. loads training and validation images
-2. normalizes class names
-3. selects CPU, CUDA, or MPS automatically
-4. trains the card classifier
-5. evaluates validation accuracy after each epoch
-6. saves the best-performing checkpoint
-7. writes a corresponding class-name mapping file
+## Useful runtime overrides
 
-The default trained-model output is:
+The code intentionally keeps local machine paths out of the package. Relevant
+environment variables include:
 
-```text
-towerlogic/models/hand_card_classifier.pt
-```
+| Variable | Purpose |
+| --- | --- |
+| `TOWERLOGIC_DRY_RUN` | Suppress tap/swipe input when set to `1`, `true`, `yes`, or `on` |
+| `PYCLASHBOT_HAND_USE_CLASSIFIER` | Enable classifier-backed hand recognition |
+| `PYCLASHBOT_HAND_MODEL` | Override the hand-classifier checkpoint |
+| `PYCLASHBOT_FIELD_DETECTOR` | Override the ONNX detector path |
+| `PYCLASHBOT_FIELD_CLASSES` | Override detector class YAML/config |
+| `PYCLASHBOT_RECORDINGS_DIR` | Store recordings outside the default app-data directory |
+| `PYCLASHBOT_BLUESTACKS_APP` | Override the BlueStacks app bundle path |
+| `PYCLASHBOT_BLUESTACKS_DATA` | Override the BlueStacks data/config directory |
+| `PYCLASHBOT_BLUESTACKS_MIM_APP` | Override the optional Multi-Instance Manager path |
+| `PYCLASHBOT_FIELD_MIN_CONF` | Set the runtime field-detection confidence floor |
+| `PYCLASHBOT_CONTINUOUS_COORDS` | Enable/disable sampled placement candidates |
 
-## Apple Silicon Support
+Logs and recordings default to OS-appropriate application-data directories,
+not the repository. Policy sampling and hand-recognition thresholds have
+additional `PYCLASHBOT_*` overrides in their respective modules.
 
-The training code can automatically select Apple's Metal Performance Shaders backend when available:
+## Platform boundaries and limitations
 
-```text
-mps
-```
+- BlueStacks is supported on macOS and Windows when its installed layout and
+  renderer are compatible with the controller.
+- Generic ADB is cross-platform.
+- MEmu and Google Play Games adapters are Windows-only in this checkout.
+- Visual checks and templates are tied to the 419×633 coordinate space and to
+  recognizable Clash Royale UI elements. A game update can invalidate them.
+- The field model and card classifier are experimental models trained on
+  project-specific imagery; successful loading is not a guarantee of current
+  live-game accuracy.
+- The policy is a small learned scorer combined with hand-written candidate
+  masks and safety rules, not a general game-playing system.
+- Learning history is in-memory for the current process and is not a durable
+  experiment database. Enabling online training changes `models/policy.pt`.
+- The GUI's learning graph shows rolling episode/per-play reward telemetry; it
+  is a monitoring aid, not a training dashboard with persisted history.
 
-Otherwise it falls back to CUDA or CPU depending on the machine.
+### Analytics graph semantics
 
-The field detector uses ONNX Runtime on CPU. The committed detector is `towerlogic/models/field_detector.onnx`; the matching PyTorch checkpoint is `towerlogic/models/field_detector.pt`.
+The cyan series is the shaped reward recorded after an online policy update at
+the end of a game. The orange series is the immediate per-play reward recorded
+while cards are being played. `Last loss` is a scalar label for the most recent
+online update; it is not a third plotted series. `Games` counts completed online
+updates, not all battles or screenshots. The graph is expected to be empty when
+the policy or online-training toggle is off, and history is not retained after
+the process exits.
 
-## Development Notes
+## Project history
 
-TowerLogic was developed as an experimental project rather than a production gameplay product.
+TowerLogic began as an emulator-control and image-recognition experiment. The
+recent compatibility work focused on making that existing architecture usable
+again on modern macOS/BlueStacks Air: portable paths and packaging, bundled
+ADB and instance discovery, Android foreground parsing, current UI detection,
+bounded reward-screen recovery, and an explicit dry-run safety mode. It did not
+replace the original state machine or retrain the included models.
 
-The codebase contains multiple generations of:
+## Repository hygiene
 
-* image-recognition logic
-* card-detection techniques
-* gameplay strategies
-* model checkpoints
-* policy experimentation
-* emulator integrations
-* debugging tools
+Generated virtual environments, Python caches, macOS metadata, recordings,
+logs, and exported ONNX files are ignored by `.gitignore`. Runtime models,
+templates, class maps, and the included example datasets remain tracked. Keep
+personal emulator settings and credentials in the OS application-data folder,
+never in this repository.
 
-As a result, some components are research-oriented or exploratory rather than part of one finalized architecture.
+## Dataset attribution
 
-## Repository Cleanup
+The included `Clash royale.v6i.yolov8/` export is attributed to Roboflow
+Universe, dataset “Clash royale v6”, under the license and attribution terms
+included with the export:
 
-Local development environments and generated files should not be committed. A `.gitignore` is included for environments, Python/macOS metadata, recordings, and exported ONNX files. Existing historical artifacts remain tracked until deliberately removed.
-
-The virtual environment should be named `.venv/` locally and recreated from project dependencies rather than uploaded to GitHub.
-
-## Platform and external requirements
-
-No emulator, APK, Android game installation, ADB device, or Windows emulator installation is bundled. The image templates and fixed coordinates are tied to the expected 419×633 game viewport and may require updates when the game UI changes. The hand-classifier checkpoint and class map are under `towerlogic/models/`; policy checkpoints are under `models/`. The smaller ImageFolder dataset used by the hand-classifier workflow is `cards_deck/` (train/valid only).
-
-Useful runtime overrides are provided through environment variables, including `PYCLASHBOT_RECORDINGS_DIR`, `PYCLASHBOT_HAND_MODEL`, `PYCLASHBOT_HAND_USE_CLASSIFIER`, `PYCLASHBOT_FIELD_DETECTOR`, `PYCLASHBOT_FIELD_CLASSES`, `PYCLASHBOT_BLUESTACKS_APP`, `PYCLASHBOT_BLUESTACKS_DATA`, and `PYCLASHBOT_BLUESTACKS_MIM_APP`. Policy sampling and confidence thresholds use additional `PYCLASHBOT_*` variables in the detection and policy modules.
-
-## Dataset Attribution
-
-The included Clash Royale YOLOv8 dataset was obtained through Roboflow.
-
-**Dataset:** Clash royale v6
-**Source:** Roboflow Universe
-**Images:** 1,727 files currently present in this checkout (the upstream export documentation says 1,792)
-**Format:** YOLOv8
-**License:** CC BY 4.0
-
-Source:
-
-[https://universe.roboflow.com/angelfire/clash-royale-cylln](https://universe.roboflow.com/angelfire/clash-royale-cylln)
-
-The dataset attribution files included with the export should remain in the repository if the dataset itself is redistributed.
+<https://universe.roboflow.com/angelfire/clash-royale-cylln>
 
 ## Disclaimer
 
-TowerLogic is an independent technical and educational project focused on machine learning, computer vision, automation, and game-state analysis.
+Clash Royale, its characters, artwork, cards, and related intellectual property
+belong to Supercell and their respective rights holders. TowerLogic is an
+independent educational/technical project and is not affiliated with,
+endorsed by, sponsored by, or associated with Supercell. Users are responsible
+for complying with applicable software, platform, game, dataset, and
+third-party terms.
 
-Clash Royale, its characters, artwork, cards, and related intellectual property belong to Supercell and their respective rights holders.
+## Suggested GitHub metadata
 
-This project is not affiliated with, endorsed by, sponsored by, or associated with Supercell.
+Description:
 
-Users are responsible for complying with applicable software, platform, game, dataset, and third-party terms when running or modifying the project.
+> Experimental Python computer-vision and ML pipeline for Clash Royale game-state analysis and safe emulator dry runs.
 
+Topics:
 
-
-**GitHub description:**
-
-```text
-Python computer vision and ML project for Clash Royale combining PyTorch card classification, YOLOv8 data, image recognition, emulator control, and automated gameplay policy logic.
-````
-
-**Topics:**
-
-```text
-python
-pytorch
-computer-vision
-machine-learning
-yolov8
-opencv
-image-classification
-object-detection
-game-ai
-automation
-adb
-clash-royale
-```
+`python`, `pytorch`, `computer-vision`, `machine-learning`, `opencv`,
+`onnx-runtime`, `object-detection`, `image-classification`, `game-ai`, `adb`,
+`automation`

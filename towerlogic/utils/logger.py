@@ -281,6 +281,7 @@ class Logger:
                 self.policy_progress = self.policy_progress[-max_len:]
             if len(self.policy_losses) > max_len:
                 self.policy_losses = self.policy_losses[-max_len:]
+        self._update_stats()
 
     def add_policy_step(self, reward: float) -> None:
         """Record a per-play reward update for UI graphs."""
@@ -683,6 +684,15 @@ class ProcessLogger(Logger):
         if now - self._last_step_push < 0.25:
             return
         self._last_step_push = now
+        if self._stats_queue is not None:
+            try:
+                self._stats_queue.put_nowait(self.stats.copy())
+            except Exception:
+                pass
+
+    def add_policy_progress(self, reward: float, loss: float | None = None) -> None:
+        """Record an episode update and publish it to the GUI immediately."""
+        super().add_policy_progress(reward, loss)
         if self._stats_queue is not None:
             try:
                 self._stats_queue.put_nowait(self.stats.copy())

@@ -8,8 +8,6 @@ import time
 from contextlib import suppress
 from os.path import normpath
 
-import cv2
-
 from towerlogic.bot.nav import (
     check_for_trophy_box_reward,
     check_if_in_battle,
@@ -817,7 +815,6 @@ class BlueStacksEmulatorController(AdbBasedController):
                 screenshot_available = readiness_image is not None
                 rendered = bool(screenshot_available and readiness_image.size and int(readiness_image.max()) > 8)
                 if screenshot_available:
-                    cv2.imwrite("/tmp/towerlogic-startup-readiness.png", readiness_image)
                     legacy_menu, menu_pixels, menu_matches = inspect_clash_main_menu(readiness_image)
                     current_menu, current_details = detect_current_clash_main_menu(readiness_image)
                     main_menu = current_menu or legacy_menu

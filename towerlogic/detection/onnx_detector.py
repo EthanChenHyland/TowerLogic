@@ -145,12 +145,22 @@ class OnnxTroopDetector:
         for i in indices:
             x1, y1, x2, y2 = xyxy[i]
             name, bot_id, side = _resolve_class(self.class_names, int(cls_ids[i]))
+            # Keep coordinates valid for the source image.  Exported boxes can
+            # extend beyond an ROI/image edge; callers use these values for
+            # arena-side logic and drawing, so negative or oversized bounds
+            # must not escape the detector.
+            x1 = int(max(0, min(orig_w, x1)))
+            y1 = int(max(0, min(orig_h, y1)))
+            x2 = int(max(0, min(orig_w, x2)))
+            y2 = int(max(0, min(orig_h, y2)))
+            if x2 <= x1 or y2 <= y1:
+                continue
             detections.append(
                 Detection(
-                    x1=int(max(0, x1)),
-                    y1=int(max(0, y1)),
-                    x2=int(max(0, x2)),
-                    y2=int(max(0, y2)),
+                    x1=x1,
+                    y1=y1,
+                    x2=x2,
+                    y2=y2,
                     conf=float(confs[i]),
                     cls_id=int(cls_ids[i]),
                     name=name,
