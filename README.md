@@ -94,6 +94,30 @@ project's input methods.
 
 ## Setup
 
+### Desktop downloads
+
+Download the Windows x64 or macOS Apple Silicon app from
+[Releases](https://github.com/EthanChenHyland/TowerLogic/releases).
+Extract the Windows ZIP and launch `TowerLogic.exe` inside its folder. On macOS
+15 or newer, extract the ZIP and move `TowerLogic.app` to Applications. Intel Macs
+are not supported by the packaged build. Python and the ML runtimes are included;
+an emulator/game installation is still required. These builds are not
+developer-signed or Apple-notarized; see the release notes for first-launch steps.
+
+To reproduce a native build, use Python 3.12 on the target OS:
+
+```bash
+python -m pip install -r packaging/requirements.txt .
+python -m unittest discover -s tests -v
+python -m PyInstaller --clean --noconfirm packaging/TowerLogic.spec
+python packaging/verify_build.py
+```
+
+Tagging `v<version>` runs both native builds and publishes only after their tests
+pass. Versions in `pyproject.toml`, `towerlogic/__version__`, and the tag must agree.
+
+### Run from source
+
 The project uses `pyproject.toml` and does not ship a lockfile. Recreate the
 environment with a supported Python version:
 

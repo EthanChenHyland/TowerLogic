@@ -15,3 +15,8 @@ recordings/
 
 # Local model exports/checkpoints (keep explicitly documented production models tracked)
 *.onnx
+!towerlogic/models/field_detector.onnx
+
+# Native release output
+build/
+dist/

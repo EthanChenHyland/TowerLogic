@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "towerlogic"
-version = "0.0.0"
+version = "0.1.0"
 requires-python = ">=3.12,<3.15"
 dependencies = [
     "opencv-python>=4.9.0,<5",
@@ -30,6 +30,7 @@ include = ["towerlogic*"]
 
 [tool.setuptools.package-data]
 towerlogic = [
+    "__version__",
     "models/*",
     "detection/reference_images/**/*.png",
     "interface/assets/*",

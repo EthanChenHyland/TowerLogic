@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 import math
 import tkinter as tk
 from contextlib import suppress
@@ -33,9 +35,6 @@ from towerlogic.interface.enums import (
     UIField,
 )
 
-ICON_PNG_BASE64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAB1klEQVR4nO3dMW7TYBiAYQdxCLIg0XAKlBmJK7QSWduFc8DAwNSBKUhk74TESVi6sHTmBGVOhlRVBbbzPs9mOXZ+Ka++WIklDwMAAAAAAAAAAAAAADBXi7EXcL65un/M63fb68Wcj3/ofP/bszHfnPEJIE4Acc+Hidm8v9jb3n77PuvjDz32fP+aCRAngDgBxAkgTgBxAogTQJwA4gQQJ4A4AcTN7n6AU7NzPwBj8hUQJ4C4yd0PsF6/Obp/dfZqmLLl8sXR/R8/fR6mxASIE0CcAOImdw1w6O3yx972xc2HYcq+Xg6zYgLECSBOAHECiBNAnADiBBAngDgBxAkgTgBxk/8v4NCfu1/DtK2HOTEB4gQQJ4A4AcQJIE4AcQKIm93vAF8uX4+9hJNiAsQJIE4AcQKIE0CcAOIEEDf53wF+3r3b216djbaUk2QCxAkgTgBxk78GeKqnPqNn88AzgObOBIgTQJwA4k7+GuDQ79vbo/tfrlZDiQkQJ4A4AcQJIE4AcQKIE0CcAOIEECeAOAHECSBOAHECiBNAnADiBBAngDgBxAkgTgBxAogTQJwA4gQQJ4A4AcQtxl7A+ebqfgjbba9H/QxMgDgBxAkAAAAAAADghP0FdkY3kXWTFasAAAAASUVORK5CYII="
-)
 from towerlogic.utils.logger import log_dir
 
 if TYPE_CHECKING:
@@ -64,8 +63,9 @@ class TowerLogicUI(ttk.Window):
         self._theme_retry_pending = False
         self.advanced_settings_var = ttk.BooleanVar(value=False)
         self.bs_instance_var = ttk.StringVar(value="")
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        self._default_model_path = os.path.join(project_root, "models", "policy.pt")
+        from towerlogic.utils.resources import default_policy_path
+
+        self._default_model_path = str(default_policy_path())
         self.policy_toggle_var = ttk.BooleanVar(value=False)
         self.policy_epsilon_var = ttk.StringVar(value="0.10")
         self.policy_model_var = ttk.StringVar(value=self._default_model_path)
@@ -88,15 +88,7 @@ class TowerLogicUI(ttk.Window):
         self._suspend_traces = 0
         self._log_widgets: list[tk.Text] = []
         self._log_lock_scroll = False
-        self.log_dump_path_var = ttk.StringVar(
-            value=os.path.join(
-                os.path.expanduser("~"),
-                "Library",
-                "Logs",
-                "TowerLogic",
-                "log_dump.txt",
-            )
-        )
+        self.log_dump_path_var = ttk.StringVar(value=os.path.join(log_dir, "log_dump.txt"))
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)  # Tabs get more space
@@ -125,19 +117,12 @@ class TowerLogicUI(ttk.Window):
             pass
 
     def _set_app_icon(self) -> None:
-        try:
-            data = ICON_PNG_BASE64.strip()
-            if not data:
-                return
-            self._icon_image = tk.PhotoImage(data=data)
-            # Use a smaller version for the header title.
-            try:
-                self._icon_header_image = self._icon_image.subsample(4, 4)
-            except Exception:
-                self._icon_header_image = self._icon_image
-            self.iconphoto(True, self._icon_image)
-        except Exception:
-            pass
+        assets = Path(__file__).resolve().parent / "assets"
+        self._icon_image = tk.PhotoImage(file=str(assets / "towerlogic.png"))
+        self._icon_header_image = self._icon_image.subsample(4, 4)
+        self.iconphoto(True, self._icon_image)
+        if sys.platform == "win32":
+            self.iconbitmap(str(assets / "towerlogic.ico"))
 
     def register_config_callback(self, callback: Callable[[dict[str, object]], None]) -> None:
         self._config_callback = callback
@@ -557,18 +542,6 @@ class TowerLogicUI(ttk.Window):
         )
         self.menu_btn.bind("<Button-1>", lambda _event: self._toggle_menu())
         self.menu_btn.place(x=10, y=22, anchor="w")
-        if not hasattr(self, "_icon_header_image"):
-            try:
-                data = ICON_PNG_BASE64.strip()
-                if data:
-                    icon = tk.PhotoImage(data=data)
-                    try:
-                        self._icon_header_image = icon.subsample(4, 4)
-                    except Exception:
-                        self._icon_header_image = icon
-                    self._icon_image = icon
-            except Exception:
-                pass
         if hasattr(self, "_icon_header_image"):
             self.title_icon = tk.Label(
                 header,
